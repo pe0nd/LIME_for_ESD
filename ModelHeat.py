@@ -3,9 +3,13 @@ import demand_time_series_object as dtso
 import pv_time_series_object as ptso
 import pyomo.environ as pyo
 import numpy as np
+import random
+from pyomo.opt import SolverFactory
+from pyomo.opt import SolverStatus, TerminationCondition
+
 
 def getSettings():
-    """Return settingsDict with default settings for usage in an HouseModel class object"""
+    """Returns a dictionary with default settings for usage in an HouseModel class object"""
     settingsDict = {"time": 24 * 6,
                     "cost_Battery": 30 / 365,
                     "cost_buy": 0.25,
@@ -16,6 +20,12 @@ def getSettings():
                     "cost_HeatStorage": 5 / 365,
                     "HP_COP": 3,
                     "dem_heat": 2,
+                    "pv_curve": "box",
+                    "cloud_dist": "equal",
+                    "cloud_pow": "pow",
+                    "dem_shape": "uniform",
+                    "dem_heat_shape": "uniform",
+                    "non_reductive": True
                     }
     return settingsDict
 
@@ -23,46 +33,44 @@ def getSettings():
 class HouseModel:
     """Create an instance of the House model, setting its basic parameters"""
 
-    def __init__(self, pv_curve="box", cloud_dist="equal", cloud_pow="pow", dem_shape="uniform",
-                 dem_heat_shape="uniform", non_reductive=True, settingsDict=None):
-        self.pv_curve = pv_curve
-        self.cloud_dist = cloud_dist
-        self.cloud_pow = cloud_pow
-        self.dem_shape = dem_shape
-        self.dem_heat_shape = dem_heat_shape
-        self.non_reductive = non_reductive
-        if settingsDict == None:
+    def __init__(self, settings_dict=None):
+        if settings_dict is None:
             self.Settings = getSettings()
         else:
-            self.Settings = settingsDict
+            self.Settings = settings_dict
+        self.pv_curve = settings_dict["pv_curve"]
+        self.cloud_dist = settings_dict["cloud_dist"]
+        self.cloud_pow = settings_dict["cloud_pow"]
+        self.dem_shape = settings_dict["dem_shape"]
+        self.dem_heat_shape = settings_dict["dem_heat_shape"]
+        self.non_reductive = settings_dict["non_reductive"]
+        self.model = pyo.ConcreteModel()
 
-    def sample_model(self):
-        import pyomo.environ as pyo
-        from pyomo.opt import SolverFactory
-        # Step 0: Create an instance of the model
+
+    def build(self):
+        """Initiate the model and run it."""
+        # Create an instance of the model
         model = pyo.ConcreteModel()
 
-        # Step 1: Define index sets
+        # Define index sets and preprocess inputs
         time = range(self.Settings["time"])
         delta_time = 1 / (self.Settings["time"] / 24)
 
-        # Step 1.5: Parameters
-
-        # Electric Parameters
+        # electric parameters
         cost_Battery = self.Settings["cost_Battery"]  # *((time[-1]+1)/8760)  # € / (lifetime * kWh)
         cost_buy_ele = self.Settings["cost_buy"]  # €/kWh
-        battery_in_eff = 1  # efficency 90%
 
-        cost_HeatStorage = self.Settings["cost_HeatStorage"]
+        cost_HeatStorage = self.Settings["cost_HeatStorage"] # €/kWh
 
-
+        # input processing for time series
         time_step_selection = ["00:00", "01:00", "02:00", "03:00", "04:00", "05:00",
                                "06:00", "07:00", "08:00", "09:00", "10:00", "11:00",
                                "12:00", "13:00", "14:00", "15:00", "16:00", "17:00",
                                "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"]
-        day = 140 #random.randint(120, 182)  # May - July
+        day = random.randint(120, 182)  # May - July
         day_type = 1
 
+        # get an electric demand time series
         e_dem_obj = dtso.demand_time_series_object(shape=self.dem_shape,
                                                    absolute_demand=self.Settings["dem"],
                                                    delta_time=delta_time,
@@ -74,6 +82,7 @@ class HouseModel:
 
         DemandVal = e_dem_obj.get_array()
 
+        # get a heat demand time series
         h_dem_obj = dtso.demand_time_series_object(shape=self.dem_shape,
                                                    absolute_demand=self.Settings["dem"],
                                                    delta_time=delta_time,
@@ -84,6 +93,7 @@ class HouseModel:
 
         DemandHeatVal = h_dem_obj.get_array()
 
+        # get a PV availability time series with clouds
         pv_av_obj = ptso.pv_time_series_object(shape=self.pv_curve,
                                                delta_time=delta_time,
                                                length=time.__len__(),
@@ -99,12 +109,13 @@ class HouseModel:
 
         availability_pv = pv_av_obj.get_array()
 
+        #
         if isinstance(self.Settings["pow_clouds"], list):
             loss = self.Settings["pow_clouds"][0]
         else:
             loss = self.Settings["pow_clouds"]
 
-        # Step 2: Define the decision
+        # Define the Pyomo variables
 
         # Electricity Sector
         model.EnergyPV = pyo.Var(time, within=pyo.NonNegativeReals)
@@ -133,13 +144,13 @@ class HouseModel:
         # indicators
         model.costHeatStorage = pyo.Var(within=pyo.Reals)
 
-        # Step 3: Define Objective
+        # Define Objective
         model.cost = pyo.Objective(expr=cost_buy_ele * sum(
             model.EnergyBuy[i] for i in time) + cost_Battery * model.CapacityBattery +
                                         cost_HeatStorage * model.CapacityHeatStorage, sense=pyo.minimize)
 
-        # Step 4: Constraints
-        model.limEQ = pyo.ConstraintList()
+        # Define Constraints
+        model.limEQ = pyo.ConstraintList()  # technology limits
 
         for i in time:
             model.limEQ.add(
@@ -152,7 +163,7 @@ class HouseModel:
             model.limEQ.add(model.EnergyHeatStorage[i] <= model.CapacityHeatStorage)  # HeatStorage energy bound
 
         model.limEQ.add(
-            model.CapacityHeatStorage <= 1000 * 0.00419 * 0.277778 * 40)  # HeatStorage UB : liter * MJ/kg K * kWh/MJ * K
+            model.CapacityHeatStorage <= 1000 * 0.00419 * 0.277778 * 40)  # HeatStorage UB:liter * MJ/kg K * kWh/MJ * K
 
         for i in time:
             model.limEQ.add(model.HeatPump_Heat[i] <= 2 * max(DemandHeatVal))  # HeatPump UB
@@ -224,25 +235,33 @@ class HouseModel:
         for i in time:
             model.PV.add(model.PV_TS[i] == availability_pv[i])
 
+        self.model = model
+
+    def run(self):
+        """Run a build model. Changes might be necessary to run with a different solver"""
+        model = self.model
         solver = SolverFactory('cplex')
+        # some solver settings
         solver.options["emphasis_numerical"] = 'y'
         # solver.options["lpmethod"] = 4
         solver.options["simplex_tolerances_optimality"] = 1e-6
         results = solver.solve(model, tee=True, keepfiles=True)
         results.write()
         # model.pprint()
-        from pyomo.opt import SolverStatus, TerminationCondition
         return model, results.solver.termination_condition
 
-def getKPI(self, basemodel=None):
+    def build_and_run(self):
+        self.build()
+        return self.run()
 
-    # read the values from a solved model
+
+def getKPI(self, basemodel=None):
+    """read the values from a solved model and return them as a dictionary"""
 
     d_x_i = {"c_b": pyo.value(self.CostBat),
              "pv": [pyo.value(self.PV_TS[i]) for i in range(144)],
              "c_HS": pyo.value(self.costHeatStorage)}
 
-    # Model.getKPI([Result, Status])
     ResDict = {}
     ResDict["Battery"] = pyo.value(self.CapacityBattery)
     ResDict["HeatStorage"] = pyo.value(self.CapacityHeatStorage)

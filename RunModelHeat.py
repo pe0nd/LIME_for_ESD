@@ -24,7 +24,7 @@ def run():
     HousePVModel = ModelHeat.HouseModel(pv_curve="real", cloud_dist="equal",
                                         cloud_pow="dist", non_reductive=True,
                                         dem_shape="real", dem_heat_shape="real",
-                                        settingsDict=settings)
+                                        settings_dict=settings)
 
     [baseResult, Status] = HousePVModel.sample_model()
 
@@ -62,7 +62,7 @@ def run():
                                                                                 cloud_pow=c_s, non_reductive=True,
                                                                                 dem_shape="real",
                                                                                 dem_heat_shape="real",
-                                                                                settingsDict=settings)
+                                                                                settings_dict=settings)
 
                                             [Result, Status] = HousePVModel.sample_model()
 
