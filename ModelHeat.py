@@ -84,7 +84,7 @@ class HouseModel:
 
         # get a heat demand time series
         h_dem_obj = dtso.demand_time_series_object(shape=self.dem_shape,
-                                                   absolute_demand=self.Settings["dem"],
+                                                   absolute_demand=self.Settings["dem_heat"],
                                                    delta_time=delta_time,
                                                    length=time.__len__(),
                                                    data_path="timeseries/h_dem.csv",
