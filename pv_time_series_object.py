@@ -161,7 +161,7 @@ class pv_time_series_object(time_series_object):
             for l1, l2 in zip(ts, demand_ts):
                 t.append(l1 - l2)
             t = np.array(t)
-            pv_limit = [np.where(t > 0)[0][0] * delta_time, 24 - np.where(t[::-1] > 0)[0][0] * delta_time]
+            pv_limit = [np.where(t > 0)[0][0], 24/delta_time - np.where(t[::-1] > 0)[0][0]]
 
         # # # "Find cloud starting points from distribution" # # #
 

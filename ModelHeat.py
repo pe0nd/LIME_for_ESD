@@ -16,13 +16,13 @@ def getSettings():
                     "dem": 1,
                     "num_clouds": 0,
                     "pow_clouds": 0,
-                    "pow_pv_surplus": 5,
+                    "pow_pv_surplus": 15,
                     "cost_HeatStorage": 5 / 365,
                     "HP_COP": 3,
                     "dem_heat": 2,
-                    "pv_curve": "box",
+                    "pv_curve": "uniform",
                     "cloud_dist": "equal",
-                    "cloud_pow": "pow",
+                    "cloud_pow": "uniform",
                     "dem_shape": "uniform",
                     "dem_heat_shape": "uniform",
                     "non_reductive": True
@@ -67,8 +67,8 @@ class HouseModel:
                                "06:00", "07:00", "08:00", "09:00", "10:00", "11:00",
                                "12:00", "13:00", "14:00", "15:00", "16:00", "17:00",
                                "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"]
+
         day = random.randint(120, 182)  # May - July
-        day_type = 1
 
         # get an electric demand time series
         e_dem_obj = dtso.demand_time_series_object(shape=self.dem_shape,

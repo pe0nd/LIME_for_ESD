@@ -9,11 +9,11 @@ dem_shape = ["uniform"]  # can also be "real"
 dem_heat_shape = ["uniform"]  # can also be "real"
 cloud_loss = range(4, 7)  # will later be multiplied by 0.1 to get loss in kWh
 battery_cost = [540, 600, 660]
-pv_surplus = [14.5, 15, 15.5]
+pv_surplus = [4.5, 5, 5.5]
 cloud_num = range(4, 7)
 hs_cost = [40, 50, 60]  # change if heat is should be considered
 rnd = [1]  # make this a list with n elements, n being the number of runs that should be done
-isHeat = [True]  # if false the heat demand will be set to 0
+isHeat = [False]  # if false the heat demand will be set to 0
 
 # We define samples as a grid over all possible combinations. A sparse selection would also be possible.
 sample_input = pd.DataFrame(list(product(pv_curve, pv_surplus, cloud_dist, cloud_loss, cloud_num,
@@ -56,7 +56,7 @@ R_base = HMHeat.build_and_run()[0]
 # # Uncomment below to get a plot of production and consumption
 # import matplotlib.pyplot as plt
 # import plot_lib as pl
-# fig = plt.figure(figsize=(12,8), dpi=80)
+# fig = plt.figure(figsize=(12, 8), dpi=80)
 # fig.add_subplot(2, 1, 1)
 # fig.add_subplot(2, 1, 2)
 # ax = fig.axes
