@@ -22,10 +22,11 @@ def getSettings():
                     "dem_heat": 2,
                     "pv_curve": "uniform",
                     "cloud_dist": "equal",
-                    "cloud_pow": "uniform",
+                    "cloud_shape": "pow",
                     "dem_shape": "uniform",
                     "dem_heat_shape": "uniform",
-                    "non_reductive": True
+                    "non_reductive": True,
+                    "morning_mist": 0
                     }
     return settingsDict
 
@@ -40,10 +41,11 @@ class HouseModel:
             self.Settings = settings_dict
         self.pv_curve = settings_dict["pv_curve"]
         self.cloud_dist = settings_dict["cloud_dist"]
-        self.cloud_pow = settings_dict["cloud_pow"]
+        self.cloud_shape = settings_dict["cloud_shape"]
         self.dem_shape = settings_dict["dem_shape"]
         self.dem_heat_shape = settings_dict["dem_heat_shape"]
         self.non_reductive = settings_dict["non_reductive"]
+        self.morning_mist = settings_dict["morning_mist"]
         self.model = pyo.ConcreteModel()
 
 
@@ -104,8 +106,9 @@ class HouseModel:
                                                clouds=self.Settings["num_clouds"],
                                                cloud_size=self.Settings["pow_clouds"],
                                                cloud_dist=self.cloud_dist,
-                                               cloud_shape=self.cloud_pow,
-                                               pv_limit=[42, 126])
+                                               cloud_shape=self.cloud_shape,
+                                               pv_limit=[42, 126],
+                                               morning_mist=self.Settings["morning_mist"])
 
         availability_pv = pv_av_obj.get_array()
 
@@ -143,11 +146,15 @@ class HouseModel:
         model.HeatPump_Electricity = pyo.Var(time, within=pyo.NonNegativeReals)
         # indicators
         model.costHeatStorage = pyo.Var(within=pyo.Reals)
+        model.morning_mist = pyo.Var(within=pyo.Reals)
 
         # Define Objective
         model.cost = pyo.Objective(expr=cost_buy_ele * sum(
             model.EnergyBuy[i] for i in time) + cost_Battery * model.CapacityBattery +
-                                        cost_HeatStorage * model.CapacityHeatStorage, sense=pyo.minimize)
+                                        cost_HeatStorage * model.CapacityHeatStorage +
+                                        # penalty so the HP isn't used for curtailment
+                                        1e-3 * sum(model.HeatPump_Electricity[i] for i in time)
+                                   , sense=pyo.minimize)
 
         # Define Constraints
         model.limEQ = pyo.ConstraintList()  # technology limits
@@ -231,6 +238,7 @@ class HouseModel:
         model.ValueSurplus = pyo.Constraint(expr=model.PV_surplus == self.Settings["pow_pv_surplus"])
         model.ValueLoss = pyo.Constraint(expr=model.energy_loss == loss)
         model.NumberClouds = pyo.Constraint(expr=model.NumClouds == self.Settings["num_clouds"])
+        model.DurationMorningMist = pyo.Constraint(expr=model.morning_mist == self.Settings["morning_mist"])
         model.PV = pyo.ConstraintList()
         for i in time:
             model.PV.add(model.PV_TS[i] == availability_pv[i])
@@ -240,11 +248,13 @@ class HouseModel:
     def run(self):
         """Run a build model. Changes might be necessary to run with a different solver"""
         model = self.model
+        # # # change below to use a different solver
         solver = SolverFactory('cplex')
-        # some solver settings
+        # some cplex settings
         solver.options["emphasis_numerical"] = 'y'
-        # solver.options["lpmethod"] = 4
         solver.options["simplex_tolerances_optimality"] = 1e-6
+        # # #
+
         results = solver.solve(model, tee=True, keepfiles=True)
         results.write()
         # model.pprint()
@@ -255,21 +265,22 @@ class HouseModel:
         return self.run()
 
 
-def getKPI(self, basemodel=None):
+def getKPI(model, basemodel=None):
     """read the values from a solved model and return them as a dictionary"""
 
-    d_x_i = {"c_b": pyo.value(self.CostBat),
-             "pv": [pyo.value(self.PV_TS[i]) for i in range(144)],
-             "c_HS": pyo.value(self.costHeatStorage)}
+    d_x_i = {"c_b": pyo.value(model.CostBat),
+             "pv": [pyo.value(model.PV_TS[i]) for i in range(144)],
+             "c_HS": pyo.value(model.costHeatStorage)}
 
     ResDict = {}
-    ResDict["Battery"] = pyo.value(self.CapacityBattery)
-    ResDict["HeatStorage"] = pyo.value(self.CapacityHeatStorage)
-    ResDict["c_Bat"] = pyo.value(self.CostBat)
-    ResDict["surplus"] = pyo.value(self.PV_surplus)
-    ResDict["clouds"] = pyo.value(self.NumClouds)
-    ResDict["energy_loss"] = pyo.value(self.energy_loss)
-    ResDict["c_HS"] = pyo.value(self.costHeatStorage)
+    ResDict["Battery"] = pyo.value(model.CapacityBattery)
+    ResDict["HeatStorage"] = pyo.value(model.CapacityHeatStorage)
+    ResDict["c_Bat"] = pyo.value(model.CostBat)
+    ResDict["surplus"] = pyo.value(model.PV_surplus)
+    ResDict["clouds"] = pyo.value(model.NumClouds)
+    ResDict["energy_loss"] = pyo.value(model.energy_loss)
+    ResDict["c_HS"] = pyo.value(model.costHeatStorage)
+    ResDict["morning_mist"] = pyo.value(model.morning_mist)
     ResDict["d_b"] = d_x_i["c_b"]
     ResDict["d_p"] = d_x_i["pv"]
     ResDict["d_h"] = d_x_i["c_HS"]

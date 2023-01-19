@@ -31,7 +31,7 @@ class pv_time_series_object(time_series_object):
 
     def __init__(self, shape="uniform", delta_time=1 / 6, length=144, surplus=1, demand_ts=None,
                  data_path="timeseries/PV_TS.csv", day_selection=None, clouds=0, cloud_size=0, cloud_dist="equal",
-                 cloud_shape="pow", rescale=True, pv_limit=None):
+                 cloud_shape="pow", rescale=True, pv_limit=None, morning_mist=0):
 
         if pv_limit is None:
             pv_limit = [42, 126]
@@ -94,7 +94,7 @@ class pv_time_series_object(time_series_object):
 
             solu.sort(key=getImaginary)
 
-            # z1 = sympy.solve(eq.subs(A, self.Settings["pow_pv_surplus"]))[0].evalf()
+            # z1 = sympy.solve(eq.subs(A, model.Settings["pow_pv_surplus"]))[0].evalf()
             z1 = float(sympy.re(solu[0]))
             # the warning below is for debugging purpose and will only be called if there was no solution with
             # sufficiently small imaginary part
@@ -131,7 +131,7 @@ class pv_time_series_object(time_series_object):
                     for j in i.values():
                         t1.append(float(j) * delta_time)
 
-            # fill missing time steps
+            # Transform into right time step length (e.g., hourly data -> 15 min data)
             t1 = np.repeat(t1, int(length / t1.__len__()))
 
             # To find the right scaling factor interval doubling and interval halving is used
@@ -156,12 +156,27 @@ class pv_time_series_object(time_series_object):
             for i in range(length):
                 ts[i] = UB * t1[i]
 
-            # find limits for cloud placement
-            t = []
-            for l1, l2 in zip(ts, demand_ts):
-                t.append(l1 - l2)
-            t = np.array(t)
+            # # find limits for cloud placement where av_PV > Demand
+            # t = []
+            # for l1, l2 in zip(ts, demand_ts):
+            #     t.append(l1 - l2)
+            # t = np.array(t)
+            # pv_limit = [np.where(t > 0)[0][0], 24/delta_time - np.where(t[::-1] > 0)[0][0]]
+
+            # find sunrise and sunset
+            t = np.array(ts)
             pv_limit = [np.where(t > 0)[0][0], 24/delta_time - np.where(t[::-1] > 0)[0][0]]
+
+        # # # "Morning mist reduces the first timesteps of the pv time series" # # #
+        if morning_mist > 0:
+            # get av_PV >0
+            t = np.array(ts)
+            sunrise = np.where(t > 0)[0][0]
+            for i in range(0, morning_mist):
+                ts[sunrise+i] = 0
+            # updating production start for correct surplus calculation
+            pv_limit[0]= max(sunrise+morning_mist, pv_limit[0])
+
 
         # # # "Find cloud starting points from distribution" # # #
 
@@ -196,8 +211,9 @@ class pv_time_series_object(time_series_object):
             # # # "Place Clouds according to shape" # # #
 
             # all clouds lose an equal amount of energy
-            if cloud_shape == "pow":
+            if cloud_shape == "pow" or cloud_shape == "uniform":
                 pow_redu = cloud_size
+                demand_loss = dips_idx.__len__() * cloud_size
                 idx_offset = 0
                 while pow_redu > 0:
                     for i in dips_idx:
@@ -206,12 +222,15 @@ class pv_time_series_object(time_series_object):
                                     pow_redu)
                     idx_offset += 1
 
-            # all clouds have a fixed length, with cloud_size as number of time steps
+
+                # all clouds have a fixed length, with cloud_size as number of time steps
             if cloud_shape == "fixed":
                 pow_redu = cloud_size
+                demand_loss = 0
                 idx_offset = 0
                 while pow_redu > 0:
                     for i in dips_idx:
+                        demand_loss += demand_ts[i + idx_offset]
                         ts[i + idx_offset] = 0
                     pow_redu -= 1
                     idx_offset += 1
@@ -219,35 +238,37 @@ class pv_time_series_object(time_series_object):
             # clouds are random from a normal distribution
             if cloud_shape == "dist":
                 pow_dist = cloud_size
+                demand_loss = 0
 
                 for i in dips_idx:  # calculate individual cloud
                     pow_redu = max(random.gauss(pow_dist[0], pow_dist[1]), 0)
                     idx_offset = 0
                     while pow_redu > 0:
+                        demand_loss += min(demand_ts[i + idx_offset], pow_redu)
                         ts[i + idx_offset] = max(0, demand_ts[i + idx_offset] - pow_redu)
                         pow_redu -= demand_ts[i + idx_offset]
                         idx_offset += 1
 
-            # rescale the pv time series to fit set surplus
-            if rescale:
-                total_energy_is = 0
-                wanted_surplus = surplus
-                num_steps = 0
-                for i in range(ts.__len__()):
-                    total_energy_is += max(0, ts[i] - demand_ts[i])
-                    if ts[i] > demand_ts[i]:
-                        num_steps += 1
-                adj_factor = (wanted_surplus - total_energy_is) / num_steps
+        # rescale the pv time series to fit set surplus
+        if rescale:
+            total_energy_is = 0
+            wanted_surplus = surplus + demand_loss  # surplus now takes also the loss during the day into account
+            num_steps = 0
+            for i in range(ts.__len__()):
+                total_energy_is += max(0, ts[i] - demand_ts[i])
+                if ts[i] > demand_ts[i]:
+                    num_steps += 1
+            adj_factor = (wanted_surplus - total_energy_is) / num_steps
 
-                for i in range(ts.__len__()):
-                    if ts[i] > demand_ts[i]:
-                        ts[i] += adj_factor
+            for i in range(ts.__len__()):
+                if ts[i] > demand_ts[i]:
+                    ts[i] += adj_factor
 
         # import matplotlib.pyplot as plt
         # plt.plot(ts)
         # plt.show()
         # print(ts)
-        time_series_object.__init__(self,ts)
+        time_series_object.__init__(self, ts)
 
 
 if __name__ == '__main__':

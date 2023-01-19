@@ -94,7 +94,8 @@ def plot_production_and_demand(model_result, isHeat=False, title="Model 1", d_t=
     return ax, axh
 
 
-def plot_production_time_series(model_result, title="Model 1", d_t=1 / 6, axis=None):
+def plot_production_time_series(model_result, title="PV time series, demand and \n cost-optimal battery usage",
+                                d_t=1 / 6, axis=None):
     """
         Plot PV production, electricity demand and storage level.
 
@@ -119,10 +120,10 @@ def plot_production_time_series(model_result, title="Model 1", d_t=1 / 6, axis=N
 
     ax.plot(x, y.transpose())
     ax.set(ylabel="kW", xticks=np.arange(0, model_result.Demand.__len__() * d_t, 4), xlabel="h",
-           title="PV time series, demand and \n battery usage of " + title)
+           title=title)
     ax2 = ax.twinx()
     z = np.array([pyo.value(model_result.EnergyBattery[i]) for i in range(x.__len__())])
-    ax2.plot(x, z)
+    ax2.plot(x, z, color="red")
     ax2.set(ylabel="kWh")
     return ax
 
@@ -163,7 +164,7 @@ def plot_neighborhood(base_idx, samples, target, distance=None, neighbors=-1, la
     else:
         ax = axis
     if distance is None:
-        distance = [1]*target.__len__()
+        distance = [1] * target.__len__()
 
     # normalize the distances and apply the smooth step
     distance = pd.DataFrame(distance)
@@ -176,8 +177,6 @@ def plot_neighborhood(base_idx, samples, target, distance=None, neighbors=-1, la
     area = area.clip(upper=9.99e-1, lower=0.1)  # limits to show all points at least a little
     color = ["blue"]
 
-
-
     for i in range(samples.columns.__len__()):
         if axis is None:
             ax.append(plt.axes())
@@ -188,7 +187,7 @@ def plot_neighborhood(base_idx, samples, target, distance=None, neighbors=-1, la
         ax[i].scatter(samples[samples.columns[i]][base_idx], target[base_idx], s=30,
                       c="red", marker='x')
         if label_names is None:
-            ax[i].set(xlabel=samples.columns[i], ylabel=target.columns[0])
+            ax[i].set(xlabel=samples.columns[i], ylabel=target.name if target.ndim==1 else target.columns[0])
         else:
             ax[i].set(xlabel=label_names[i], ylabel=label_names[-1])
 
@@ -197,7 +196,7 @@ def plot_neighborhood(base_idx, samples, target, distance=None, neighbors=-1, la
 
 def plot_bars(data, label_names=None, col="blue", axis=None):
     """
-    Bar plot of different LIME or LASSO results.
+    Bar plot of different regression results.
 
     Args:
         data(pandas.DataFrame): DataFrame with features as columns and different results as rows
@@ -220,7 +219,7 @@ def plot_bars(data, label_names=None, col="blue", axis=None):
         if axis is None:
             ax.append(plt.axes())
         for idx in range(data.index.__len__()):
-            ax[i].bar(idx, data[data.columns[i]][idx], fill=col[idx])
+            ax[i].bar(idx, data[data.columns[i]][idx], color=col[idx])
         ax[i].set_ylim([min_v, max_v])
         if label_names is None:
             ax[i].set(title=data.columns[i], ylabel='weight')
